@@ -1,31 +1,17 @@
 ﻿use crate::board::PieceColor::*;
 use crate::board::PieceType::*;
 use crate::r#move::{Move};
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use crate::pos::Pos;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 pub struct Board {
     // squares are stored line-by-line, starting with a1-h1, a2-h2, ..., a8-h8
     squares: [BoardSquare; 64],
 }
 
-// The board format is the following:
-//
-// 8 |bR|bN|bB|bQ|bK|bB|bN|bR|
-// 7 |bp|bp|bp|bp|bp|bp|bp|bp|
-// 6 |  |::|  |::|  |::|  |::|
-// 5 |::|  |::|  |::|  |::|  |
-// 4 |  |::|  |::|  |::|  |::|
-// 3 |::|  |::|  |::|  |::|  |
-// 2 |wp|wp|wp|wp|wp|wp|wp|wp|
-// 1 |wR|wN|wB|wQ|wK|wB|wN|wR|
-//    a  b  c  d  e  f  g  h
-//
-// We have 9 rows. Each row contains 2 symbols for number, 3 symbols per each square * 8
-// and closing '|\n', resulting in 2 + 3 * 8 + 2 = 28. The whole board is 28 * 9 = 252
-const BOARD_STRING_CAPACITY: usize = (2 + 3 * 8 + 2) * 9;
-const SYMBOLS_ROW: &str = "   a  b  c  d  e  f  g  h  \n";
+
+const SYMBOLS_ROW: &str = "    a  b  c  d  e  f  g  h\n";
 
 impl Board {
     pub fn empty() -> Board {
@@ -66,6 +52,77 @@ impl Board {
         board
     }
 
+    /// Parses a board state from string in the following format:
+    /// ```
+    /// -- :: -- :: bK :: -- ::
+    /// :: -- :: -- bR -- :: --
+    /// -- :: -- :: -- :: -- ::
+    /// :: -- :: -- :: -- :: --
+    /// -- :: -- :: -- :: -- ::
+    /// :: -- :: -- :: -- :: --
+    /// -- :: -- :: wp :: -- ::
+    /// :: -- :: -- wK -- :: --
+    /// ```
+    /// Each row can optionally contain a row number at the start of the line and a column letters row at the end.
+    /// Each square is represented by two characters: piece color (w or b) and piece type (p, R, N, B, Q, K).
+    /// Empty squares are represented by "--" for white squares or "::" for black squares.
+    /// Rows are separated by newlines. The first row corresponds to row 8, the last row to row 1.
+    /// Columns are from 'a' to 'h', left to right.
+    pub fn from_string(input: &str) -> Result<Board, String> {
+        let mut board = Board::empty();
+        for (row, line) in input.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).enumerate() {
+            if row >= 9 {
+                return Err(String::from("Too many lines in board string"));
+            }
+            if row == 8 { continue } // don't validate the last line if it's column letters
+            let row = 7 - row;
+
+            let squares: Vec<_> = line.split_whitespace().enumerate().collect();
+            if squares.len() > 9 {
+                return Err(String::from("Too many squares in a line"));
+            }
+            let has_row_number = squares.len() == 9;
+
+            for (col, square) in squares {
+                if has_row_number && col == 0 { continue };
+                let col = if has_row_number { col - 1} else { col };
+                let pos = Pos::new(col as i8, row as i8);
+                match square {
+                    "::" => {
+                        if (col + row) % 2 != 0 {
+                            return Err(format!("Invalid empty black square position at {pos}"));
+                        }
+                    }
+                    "--" => {
+                        if (col + row) % 2 != 1 {
+                            return Err(format!("Invalid empty white square position at {pos}"));
+                        }
+                    }
+                    s if s.len() == 2 => {
+                        let color = match s.chars().nth(0).unwrap() {
+                            'w' => White,
+                            'b' => Black,
+                            _other => return Err(format!("Invalid piece color {_other} at {pos}")),
+                        };
+                        let piece = match s.chars().nth(1).unwrap() {
+                            'p' => Pawn,
+                            'R' => Rook,
+                            'N' => Knight,
+                            'B' => Bishop,
+                            'Q' => Queen,
+                            'K' => King,
+                            _other => return Err(format!("Invalid piece type {_other} at {pos}")),
+                        };
+                        board.set(col as i8, row as i8, piece, color)
+                    }
+                    _other => return Err(format!("Invalid square format {_other} at {pos}")),
+                }
+            }
+        }
+
+        Ok(board)
+    }
+
     /// Makes move for pieces. Move is not validated here. En passant and castling are checked automatically.
     pub fn make_move(&mut self, mv: &Move) {
         let sq = self.at(mv.from_col, mv.from_row).clone();
@@ -97,46 +154,79 @@ impl Board {
         *self.at_mut(col, row) = BoardSquare::with(piece, color);
     }
 
+    pub fn set_at_pos(&mut self, pos: &Pos, piece: PieceType, color: PieceColor) {
+        self.set(pos.col(), pos.row(), piece, color);
+    }
+
     pub fn clear_square(&mut self, col: i8, row: i8) {
         *self.at_mut(col, row) = BoardSquare::empty();
     }
 
-    pub fn get_display_str(&self) -> String {
-        let mut result = String::with_capacity(BOARD_STRING_CAPACITY);
+
+    /// The board format is the following:
+    /// ```
+    /// 8  -- :: -- bK -- :: -- ::
+    /// 7  :: -- :: -- bR -- :: --
+    /// 6  -- :: -- :: -- :: -- ::
+    /// 5  :: -- :: -- :: -- :: --
+    /// 4  -- :: -- :: -- :: -- ::
+    /// 3  :: -- :: -- :: -- :: --
+    /// 2  -- :: -- :: wP :: -- ::
+    /// 1  :: -- :: wK :: -- :: --
+    ///     a  b  c  d  e  f  g  h
+    /// ```
+    /// If print_col_row_helpers is true, the row numbers and column letters are printed.
+    pub fn get_display_str(&self, print_col_row_helpers: bool) -> String {
+        // When printing row and col helpers, we have 9 rows.
+        // Each row contains 2 symbols for number ("1 "), 3 symbols per each square * 8 (" bK"),
+        // and closing '\n', resulting in 2 + 3 * 8 + 1 = 27. We also have '\n' at the start of the board.
+        const FULL_BOARD_STRING_CAPACITY: usize = 1 + (2 + 3 * 8 + 1) * 9;
+
+        // When printing without row and col helpers, we have 8 rows.
+        // Each row contains 3 symbols per each square * 8 (" bK"), excluding the first square without a whitespace,
+        // which is compensated by a closing '\n', resulting in 3 * 8 = 24. We also have '\n' at the start of the board.
+        const SHORT_BOARD_STRING_CAPACITY: usize = 1 + (3 * 8) * 8;
+
+        let mut result = String::with_capacity(if print_col_row_helpers { FULL_BOARD_STRING_CAPACITY } else { SHORT_BOARD_STRING_CAPACITY });
+        result.push('\n');
 
         // print the board row-by-row starting from the topmost row which is 8
         for row in (0..8).rev() {
-            result.push_str((row + 1).to_string().as_str());
-            result.push(' ');
+            if print_col_row_helpers {
+                result.push_str((row + 1).to_string().as_str());
+                result.push(' ');
+            }
 
             for col in 0..8 {
-                result.push('|');
+                result.push(' ');
 
                 let square = self.at(col, row);
                 if square.is_occupied() {
                     result.push_str(square.to_string().as_str())
                 } else {
-                    result.push_str(if (row + col) % 2 == 0 { "::" } else { "  " })
+                    result.push_str(if (row + col) % 2 == 0 { "::" } else { "--" })
                 }
             }
-            result.push_str("|\n");
+            result.push_str("\n");
         }
 
-        result.push_str(SYMBOLS_ROW);
+        if print_col_row_helpers {
+            result.push_str(SYMBOLS_ROW);
+        }
 
         result
     }
 
-    pub fn print(&self) {
-        println!("{}", self.get_display_str());
+    pub fn print(&self, print_col_row_helpers: bool) {
+        println!("{}", self.get_display_str(print_col_row_helpers));
     }
 
     pub fn at(&self, col: i8, row: i8) -> &BoardSquare {
-        &self.squares[(row * 8 + col) as usize]
+        &self.squares[Self::get_index(col, row)]
     }
 
     pub fn at_mut(&mut self, col: i8, row: i8) -> &mut BoardSquare {
-        &mut self.squares[(row * 8 + col) as usize]
+        &mut self.squares[Self::get_index(col, row)]
     }
 
     pub fn panic_if_out_of_bounds(col: i8, row: i8) {
@@ -145,8 +235,8 @@ impl Board {
         }
     }
 
-    fn get_index(col: i8, row: i8) -> i8 {
-        row * 8 + col
+    fn get_index(col: i8, row: i8) -> usize {
+        (row * 8 + col) as usize
     }
 
     /// Returns true if the move is a possible rook capture move. Doesn't validate the move in
@@ -283,10 +373,16 @@ impl Board {
             return None;
         }
 
-        let check_range = if mv.to_col == 6 { 4..=6 } else { 1..=4 };
-        for col in check_range {
+        let under_attack_check_range = if mv.to_col == 6 { 4..=6 } else { 2..=4 };
+        let occupied_check_range = if mv.to_col == 6 { 5..=6 } else { 1..=3 };
+        for col in under_attack_check_range {
+            if self.is_under_attack(col, mv.from_row, king_color.opposite())
+            {
+                return None;
+            }
+        }
+        for col in occupied_check_range {
             if self.at(col, mv.from_row).is_occupied()
-                || self.is_under_attack(col, mv.from_row, king_color.opposite())
             {
                 return None;
             }
@@ -360,6 +456,12 @@ impl Board {
     // e.g. "k7/5p2/4p3/6P1/6K1/r7/7q/8 b - - 0 1" after f5 -> therefore checking mate is not possible
     // "k7/5p2/4p1p1/6P1/5K2/8/6q1/4r3 b - - 0 2" - analogous position for stalemate.
     // after f5 only legal move is en passant, but without en passant it's stalemate.
+}
+
+impl Debug for Board {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.get_display_str(true))
+    }
 }
 
 pub const KING_OFFSETS: [Pos; 8] = [
@@ -495,5 +597,32 @@ impl Display for PieceColor {
             Black => "b",
         };
         write!(f, "{}", s)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parsing_board_str_works() {
+        let board_parsed = Board::from_string("
+            -- :: -- bK -- :: -- ::
+            :: -- :: -- bR -- :: --
+            -- :: -- :: -- :: -- ::
+            :: -- :: -- :: -- :: --
+            -- :: -- :: -- :: -- ::
+            :: -- :: -- :: -- :: --
+            -- :: -- :: wp :: -- ::
+            :: -- :: wK :: -- :: --
+        ").expect("Failed to parse board string");
+
+        let mut board_manual = Board::empty();
+        board_manual.set(3, 0, King, White);
+        board_manual.set(4, 1, Pawn, White);
+        board_manual.set(4, 6, Rook, Black);
+        board_manual.set(3, 7, King, Black);
+
+        assert_eq!(board_parsed, board_manual);
     }
 }

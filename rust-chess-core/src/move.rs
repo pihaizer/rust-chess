@@ -1,8 +1,9 @@
-﻿use crate::board::PieceColor::White;
+﻿use std::fmt::{Debug, Display};
+use crate::board::PieceColor::White;
 use crate::board::{Board, PieceColor, PieceType};
 use crate::pos::Pos;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct Move {
     pub from_col: i8,
     pub from_row: i8,
@@ -25,7 +26,7 @@ impl Move {
         }
     }
 
-    pub fn new_from_pos(from: &Pos, to: &Pos) -> Move {
+    pub fn from_pos(from: &Pos, to: &Pos) -> Move {
         Move::new(from.col(), from.row(), to.col(), to.row())
     }
 
@@ -153,5 +154,32 @@ impl Move {
         let vertical_move = i8::abs_diff(self.from_row, self.to_row);
         let horizontal_move = i8::abs_diff(self.from_col, self.to_col);
         vertical_move <= 1 && horizontal_move <= 1
+    }
+}
+
+impl Display for Move {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let from_col = (self.from_col + 'a' as i8) as u8 as char;
+        let from_row = (self.from_row + '1' as i8) as u8 as char;
+        let to_col = (self.to_col + 'a' as i8) as u8 as char;
+        let to_row = (self.to_row + '1' as i8) as u8 as char;
+        if let Some(promotion_to) = self.promotion_to {
+            let promotion_char = match promotion_to {
+                PieceType::Queen => 'q',
+                PieceType::Rook => 'r',
+                PieceType::Bishop => 'b',
+                PieceType::Knight => 'n',
+                _ => '?',
+            };
+            write!(f, "{}{}{}{}{}", from_col, from_row, to_col, to_row, promotion_char)
+        } else {
+            write!(f, "{}{}{}{}", from_col, from_row, to_col, to_row)
+        }
+    }
+}
+
+impl Debug for Move {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.to_string())
     }
 }

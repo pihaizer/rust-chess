@@ -11,6 +11,26 @@ impl Pos {
     pub const fn new(col: i8, row: i8) -> Pos {
         Pos { col, row }
     }
+    pub const fn from_notation(input: &str) -> Result<Pos, &'static str> {
+        if input.len() != 2 {
+            return Err("Invalid position notation length");
+        }
+        let bytes = input.as_bytes();
+        let col = bytes[0];
+        let row = bytes[1];
+
+        if col < b'a' || col > b'h' {
+            return Err("Invalid column in position notation");
+        }
+        if row < b'1' || row > b'8' {
+            return Err("Invalid row in position notation");
+        }
+
+        Ok(Pos {
+            col: (col - b'a') as i8,
+            row: (row - b'1') as i8,
+        })
+    }
     pub fn col(&self) -> i8 {
         self.col
     }

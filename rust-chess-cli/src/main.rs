@@ -8,7 +8,7 @@ fn main() {
     let mut input = String::new();
     loop {
         // read command from the console
-        game.board().print();
+        game.board().print(true);
         print!("Your move: ");
         io::stdout().flush().unwrap();
         

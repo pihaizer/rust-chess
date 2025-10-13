@@ -1,6 +1,7 @@
 ﻿use crate::board::PieceColor::{Black, White};
 use crate::board::{Board, PieceColor, PieceType};
 use crate::piece_moves_iterator::PieceMovesIter;
+use crate::pos::Pos;
 use crate::r#move::Move;
 
 pub struct Game {
@@ -14,14 +15,42 @@ pub struct Game {
 
 impl Game {
     pub fn new() -> Game {
-        Game {
+        let mut game = Game {
             history: GameHistory::new(),
             board: Board::new_chess_game(),
             possible_moves: Vec::new(),
             is_check: false,
             turn: White,
             result: None,
-        }
+        };
+        game.collect_possible_moves();
+        game
+    }
+
+    pub fn from_board(board: Board, turn: PieceColor) -> Game {
+        let mut game = Game {
+            history: GameHistory::new(),
+            board,
+            possible_moves: Vec::new(),
+            is_check: false,
+            turn,
+            result: None,
+        };
+        game.collect_game_state();
+        game
+    }
+
+    pub fn from_board_with_history(board: Board, turn: PieceColor, history: GameHistory) -> Game {
+        let mut game = Game {
+            history,
+            board,
+            possible_moves: Vec::new(),
+            is_check: false,
+            turn,
+            result: None,
+        };
+        game.collect_game_state();
+        game
     }
 
     pub fn board(&self) -> &Board {
@@ -31,6 +60,7 @@ impl Game {
     pub fn history(&self) -> &GameHistory {
         &self.history
     }
+
     pub fn result(&self) -> &Option<GameResult> {
         &self.result
     }
@@ -64,16 +94,7 @@ impl Game {
         self.turn = if self.turn == White { Black } else { White };
 
         // Check for game end conditions
-        self.is_check = self.board.is_check(self.turn);
-
-        self.collect_possible_moves();
-        if self.possible_moves.is_empty() {
-            if self.is_check {
-                self.result = Some(GameResult {winner: Some(self.turn.opposite())})
-            } else {
-                self.result = Some(GameResult {winner: None})
-            }
-        }
+        self.collect_game_state();
 
         Ok(())
     }
@@ -138,6 +159,36 @@ impl Game {
 
     pub fn parse_short_notation(&self, s: &str) -> Move {
         todo!()
+    }
+
+    pub fn get_moves_from(&self, col: i8, row: i8) -> &[Move] {
+        let mut from = 0;
+        while from < self.possible_moves.len() && (self.possible_moves[from].from_col < col || self.possible_moves[from].from_row < row) {
+            from += 1;
+        }
+        let mut to = from;
+        while to < self.possible_moves.len() && self.possible_moves[to].from_col == col && self.possible_moves[to].from_row == row {
+            to += 1;
+        }
+        &self.possible_moves[from..to]
+    }
+
+    pub fn get_moves_from_pos(&self, pos: Pos) -> &[Move] {
+        self.get_moves_from(pos.col(), pos.row())
+    }
+    
+    /// Collects possible moves and checks for check, checkmate, stalemate 
+    fn collect_game_state(&mut self) {
+        self.is_check = self.board.is_check(self.turn);
+
+        self.collect_possible_moves();
+        if self.possible_moves.is_empty() {
+            if self.is_check {
+                self.result = Some(GameResult {winner: Some(self.turn.opposite())})
+            } else {
+                self.result = Some(GameResult {winner: None})
+            }
+        }
     }
 
     /// Returns true if it is a promotion
@@ -227,7 +278,7 @@ impl Game {
         let square = self.board.at(from_col, from_row);
         let piece_type = square.piece_type();
         let piece_color = square.piece_color();
-        PieceMovesIter::new(&self, piece_type, piece_color, from_col, from_row, false)
+        PieceMovesIter::new(&self, piece_type, piece_color, from_col, from_row)
     }
 }
 
@@ -244,11 +295,19 @@ pub struct GameHistory {
 }
 
 impl GameHistory {
-    fn new() -> GameHistory {
+    pub fn new() -> GameHistory {
         GameHistory {
             initial_state: None,
             initial_turn: None,
             moves: Vec::new(),
+        }
+    }
+    
+    pub fn with_moves(moves: Vec<Move>) -> GameHistory {
+        GameHistory {
+            initial_state: None,
+            initial_turn: None,
+            moves,
         }
     }
 

@@ -20,7 +20,6 @@ pub struct PieceMovesIter<'a> {
     // queen: same as rook and bishop combined,
     // king: 0..7 = all 8 possible moves
     phase: i8,
-    only_captures: bool,
 }
 
 impl<'a> Iterator for PieceMovesIter<'a> {
@@ -54,8 +53,7 @@ impl<'a> PieceMovesIter<'a> {
         piece_color: PieceColor,
         from_col: i8,
         from_row: i8,
-        only_captures: bool,
-    ) -> PieceMovesIter {
+    ) -> PieceMovesIter<'a> {
         PieceMovesIter {
             game,
             piece_type,
@@ -63,7 +61,6 @@ impl<'a> PieceMovesIter<'a> {
             from: Pos::new(from_col, from_row),
             current: Pos::new(from_col, from_row),
             phase: 0,
-            only_captures,
         }
     }
 
@@ -164,16 +161,23 @@ impl<'a> PieceMovesIter<'a> {
     }
 
     fn next_queen(&mut self) -> Option<Move> {
-        let incr_result: Option<()>;
-        if self.phase < 4 {
-            incr_result = self.increment_rook(self.phase)
-        } else {
-            incr_result = self.increment_bishop(self.phase - 4)
-        }
-        if incr_result.is_some() {
-            self.next_simple()
-        } else {
-            None
+        loop {
+            let incr_result: Option<()>;
+            if self.phase < 4 {
+                incr_result = self.increment_rook(self.phase)
+            } else {
+                incr_result = self.increment_bishop(self.phase - 4)
+            }
+            if incr_result.is_some() {
+                let res = self.next_simple();
+                if let Some(mv) = res {
+                    return Some(mv);
+                } else {
+                    continue;
+                }
+            } else {
+                return None
+            }
         }
     }
 
@@ -196,7 +200,7 @@ impl<'a> PieceMovesIter<'a> {
                         self.phase += 2; // skip both castles. Should not be reachable on phase 9
                         continue;
                     }
-                    let to_col = if self.phase == 8 { 6 } else { 4 };
+                    let to_col = if self.phase == 8 { 6 } else { 2 };
                     let to = Pos::new(to_col, castle_row);
                     self.phase += 1;
                     return self.move_to(&to);
@@ -314,5 +318,5 @@ impl<'a> PieceMovesIter<'a> {
         self.current = self.from;
     }
 
-    fn move_to(&self, to: &Pos) -> Option<Move> { Some(Move::new_from_pos(&self.from, to)) }
+    fn move_to(&self, to: &Pos) -> Option<Move> { Some(Move::from_pos(&self.from, to)) }
 }
