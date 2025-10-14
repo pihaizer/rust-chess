@@ -452,4 +452,30 @@ fn king_cant_castle_when_king_under_check() -> Result<(), String> {
     Ok(())
 }
 
+#[test]
+fn king_can_castle_long() -> Result<(), String> {
+    let board = Board::from_string(
+    "8  bR bN -- bK -- :: -- bR
+           7  bp -- :: -- :: bp bp bp
+           6  bB bp bp bB bp :: -- ::
+           5  :: -- :: bp :: -- :: --
+           4  wN :: -- wp -- :: -- wp
+           3  wp -- :: -- wp wN :: --
+           2  -- wp wp :: wp :: wp ::
+           1  wR -- :: -- wK wB :: wR
+               a  b  c  d  e  f  g  h"
+    )?;
+    let game = Game::from_board(board, White);
+    let expected_move = Move::from_long_notation("e1c1");
+    
+    let moves_from_pos = game
+        .get_moves_from_pos(Pos::from_notation("e1")?);
+    
+    assert!(
+        moves_from_pos.contains(&expected_move),
+            "{:?} didn't contain {}", moves_from_pos, expected_move);
+    
+    Ok(())
+}
+
 // TODO: Check for short castle when under attack, when spaces between are occupied

@@ -53,21 +53,21 @@ impl Board {
     }
 
     /// Parses a board state from string in the following format:
+    /// ```example
+    /// 8  -- :: -- bK -- :: -- ::
+    /// 7  :: -- :: -- bR -- :: --
+    /// 6  -- :: -- :: -- :: -- ::
+    /// 5  :: -- :: -- :: -- :: --
+    /// 4  -- :: -- :: -- :: -- ::
+    /// 3  :: -- :: -- :: -- :: --
+    /// 2  -- :: -- :: wP :: -- ::
+    /// 1  :: -- :: wK :: -- :: --
+    ///     a  b  c  d  e  f  g  h
     /// ```
-    /// -- :: -- :: bK :: -- ::
-    /// :: -- :: -- bR -- :: --
-    /// -- :: -- :: -- :: -- ::
-    /// :: -- :: -- :: -- :: --
-    /// -- :: -- :: -- :: -- ::
-    /// :: -- :: -- :: -- :: --
-    /// -- :: -- :: wp :: -- ::
-    /// :: -- :: -- wK -- :: --
-    /// ```
-    /// Each row can optionally contain a row number at the start of the line and a column letters row at the end.
+    /// Row and column helpers can be omitted.
     /// Each square is represented by two characters: piece color (w or b) and piece type (p, R, N, B, Q, K).
     /// Empty squares are represented by "--" for white squares or "::" for black squares.
     /// Rows are separated by newlines. The first row corresponds to row 8, the last row to row 1.
-    /// Columns are from 'a' to 'h', left to right.
     pub fn from_string(input: &str) -> Result<Board, String> {
         let mut board = Board::empty();
         for (row, line) in input.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).enumerate() {
@@ -132,9 +132,6 @@ impl Board {
             sq.piece_type().unwrap()
         };
 
-        self.clear_square(mv.from_col, mv.from_row);
-        self.set(mv.to_col, mv.to_row, piece_type, sq.piece_color());
-
         if let Some(en_passant_at) = self.is_en_passant_move(mv) {
             self.clear_square(en_passant_at.col(), en_passant_at.row());
         }
@@ -148,6 +145,9 @@ impl Board {
                 sq.piece_color(),
             );
         }
+
+        self.clear_square(mv.from_col, mv.from_row);
+        self.set(mv.to_col, mv.to_row, piece_type, sq.piece_color());
     }
 
     pub fn set(&mut self, col: i8, row: i8, piece: PieceType, color: PieceColor) {
@@ -164,7 +164,7 @@ impl Board {
 
 
     /// The board format is the following:
-    /// ```
+    /// ```example
     /// 8  -- :: -- bK -- :: -- ::
     /// 7  :: -- :: -- bR -- :: --
     /// 6  -- :: -- :: -- :: -- ::
@@ -316,7 +316,7 @@ impl Board {
         if captured_sq.is_occupied() {
             return None;
         }
-        Some(Pos::new(mv.from_col, mv.to_row))
+        Some(Pos::new(mv.to_col, mv.from_row))
     }
 
     /// Checks if the move itself is from and to the right squares to be a castle move,
@@ -559,6 +559,23 @@ impl PieceType {
             Bishop | Knight | Rook | Queen => true,
         }
     }
+
+    pub fn from_str(s: &str) -> Option<PieceType> {
+        let Some(c) = s.chars().nth(0) else { return None };
+        Self::from_char(c)
+    }
+
+    pub fn from_char(c: char) -> Option<PieceType> {
+        match c {
+            'p' => Some(Pawn),
+            'R' => Some(Rook),
+            'N' => Some(Knight),
+            'B' => Some(Bishop),
+            'Q' => Some(Queen),
+            'K' => Some(King),
+            _other => None,
+        }
+    }
 }
 
 impl Display for PieceType {
@@ -575,7 +592,7 @@ impl Display for PieceType {
     }
 }
 
-#[derive(PartialEq, Copy, Clone)]
+#[derive(PartialEq, Copy, Clone, Debug)]
 pub enum PieceColor {
     White,
     Black,

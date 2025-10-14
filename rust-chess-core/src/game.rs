@@ -1,8 +1,10 @@
 ﻿use crate::board::PieceColor::{Black, White};
 use crate::board::{Board, PieceColor, PieceType};
+use crate::r#move::Move;
 use crate::piece_moves_iterator::PieceMovesIter;
 use crate::pos::Pos;
-use crate::r#move::Move;
+use regex::Regex;
+use std::sync::LazyLock;
 
 pub struct Game {
     board: Board,
@@ -65,27 +67,18 @@ impl Game {
         &self.result
     }
 
+    pub fn is_check(&self) -> bool { self.is_check }
+
     pub fn make_move(&mut self, mv: &Move) -> Result<(), &'static str> {
         if self.result.is_some() {
             return Err("Game is over");
         }
 
-        let sq = self.board.at(mv.from_col, mv.from_row).clone();
-
         // Validate the move
         self.validate_move(&mv)?;
 
-        let new_piece_type = if let Some(promotion) = mv.promotion_to {
-            promotion
-        } else {
-            sq.piece_type().unwrap()
-        };
-
         // Update the board
         self.board.make_move(mv);
-        self.board.clear_square(mv.from_col, mv.from_row);
-        self.board
-            .set(mv.to_col, mv.to_row, new_piece_type, sq.piece_color());
 
         // Update the history
         self.history.moves.push(*mv);
@@ -125,15 +118,12 @@ impl Game {
             return Err("Cannot move on your own piece");
         }
 
-        let mut is_promotion = false;
-        // let mut en_passant_captured_at: Option<Coords> = None;
+        if piece != PieceType::Pawn && mv.promotion_to.is_some() {
+            return Err("Only pawns can be promoted");
+        }
 
         let is_valid_move: bool = match piece {
-            PieceType::Pawn => {
-                let promotion = self.validate_pawn_move(mv, color)?;
-                is_promotion = promotion;
-                true
-            }
+            PieceType::Pawn => self.validate_pawn_move(mv, color).is_ok(),
             PieceType::Bishop => self.board.is_possible_bishop_capture(mv),
             PieceType::Knight => mv.is_knight_move(),
             PieceType::Rook => self.board.is_possible_rook_capture(mv),
@@ -141,11 +131,8 @@ impl Game {
             PieceType::King => self.validate_king_move(mv).is_ok(),
         };
 
-        if !is_valid_move { return Err ("Invalid move for the piece") }
-
-        // existence of promotion for pawn is validated in validate_pawn_move
-        if !is_promotion && mv.promotion_to.is_some() {
-            return Err("Cannot promote a non-pawn move");
+        if !is_valid_move {
+            return Err("Invalid move for the piece");
         }
 
         let mut imitated_board = self.board.clone();
@@ -157,17 +144,186 @@ impl Game {
         Ok(())
     }
 
-    pub fn parse_short_notation(&self, s: &str) -> Move {
-        todo!()
+    pub fn parse_short_notation(&self, s: &str) -> Result<Move, String> {
+        const SHORT_NOTATION_REGEX: &str = r"(?x)
+            (?<piece>[RBNKQ])?
+            (?<disambig_col>[a-h])?
+            (?<disambig_row>[1-8])?
+            (?<takes>x)?
+            (?<col>[a-h])
+            (?<row>[1-8])
+            (?<promotion>(([=/])?([RBNQ]))|(\(([RBNQ])\)))?
+            (?<appendix>[+\#])?
+            ";
+        static REGEX: LazyLock<Regex> = LazyLock::new(|| {
+            Regex::new(SHORT_NOTATION_REGEX).expect("Invalid SHORT_NOTATION_REGEX")
+        });
+
+        // enum Appendix {
+        //     None,
+        //     Check,
+        //     Mate,
+        // }
+
+        if s.starts_with("0-0-0") || s.starts_with("o-o-o") || s.starts_with("O-O-O") {
+            // queenside castle
+            let (row, col_from, col_to) = if self.turn == White {
+                (0, 4, 2)
+            } else {
+                (7, 4, 2)
+            };
+            let mv = Move::new(col_from, row, col_to, row);
+            if self.validate_move(&mv).is_err() {
+                return Err("Invalid castle move".to_string());
+            }
+            return Ok(mv);
+        } else if s.starts_with("0-0") || s.starts_with("o-o") || s.starts_with("O-O") {
+            // kingside castle
+            let (row, col_from, col_to) = if self.turn == White {
+                (0, 4, 6)
+            } else {
+                (7, 4, 6)
+            };
+            let mv = Move::new(col_from, row, col_to, row);
+            if self.validate_move(&mv).is_err() {
+                return Err("Invalid castle move".to_string());
+            }
+            return Ok(mv);
+        } 
+
+        let Some(captures) = REGEX.captures(s) else {
+            return Err("Failed to parse short notation string".to_string());
+        };
+
+        let piece = captures.name("piece");
+        let disambig_col = captures.name("disambig_col");
+        let disambig_row = captures.name("disambig_row");
+        let takes = captures.name("takes");
+        let col = &captures["col"];
+        let row = &captures["row"];
+        let promotion = captures.name("promotion");
+        // let appendix = captures.name("appendix");
+
+        let piece = if let Some(piece) = piece {
+            PieceType::from_str(piece.as_str()).unwrap()
+        } else {
+            PieceType::Pawn
+        };
+        let disambig_col = if let Some(disambig_col) = disambig_col {
+            Some((disambig_col.as_str().as_bytes()[0] - b'a') as i8)
+        } else {
+            None
+        };
+        let disambig_row = if let Some(disambig_row) = disambig_row {
+            Some((disambig_row.as_str().as_bytes()[0] - b'1') as i8)
+        } else {
+            None
+        };
+        let takes = takes.is_some();
+        let to_col = (col.as_bytes()[0] - b'a') as i8;
+        let to_row = (row.as_bytes()[0] - b'1') as i8;
+        let promotion = match promotion {
+            None => None,
+            Some(prom) => match prom.as_str().len() {
+                1 => Some(PieceType::from_str(prom.as_str()).unwrap()),
+                2 | 3 => Some(PieceType::from_char(prom.as_str().chars().nth(1).unwrap()).unwrap()),
+                _ => panic!("Invalid promotion length"),
+            },
+        };
+
+        // let appendix = match appendix {
+        //     None => Appendix::None,
+        //     Some(app) => {
+        //         match app.as_str() {
+        //             "+" => Appendix::Check,
+        //             "#" => Appendix::Mate,
+        //             _ => panic!("Invalid appendix"),
+        //         }
+        //     }
+        // };
+
+        let target_sq = self.board.at(to_col, to_row);
+        let target_piece = target_sq.piece();
+        let target_color = target_sq.piece_color();
+
+        if target_piece.is_some() && target_color == self.turn {
+            return Err("Cannot move to your own piece".to_string());
+        }
+
+        // Find from and to positions, validate move, check if it gives check/mate
+        let mut result_mv: Option<Move> = None;
+        let col_range = if let Some(dcol) = disambig_col {
+            dcol..=dcol
+        } else {
+            0..=7
+        };
+        for col in col_range {
+            let row_range = if let Some(d_row) = disambig_row {
+                d_row..=d_row
+            } else {
+                0..=7
+            };
+            for row in row_range {
+                let sq = self.board.at(col, row);
+                let Some((piece_type, piece_color)) = sq.piece() else {
+                    continue;
+                };
+                if piece_color != self.turn {
+                    continue;
+                };
+                if piece_type != piece {
+                    continue;
+                };
+
+                let mv = if let Some(prom) = promotion {
+                    Move::with_promotion(col, row, to_col, to_row, prom)
+                } else {
+                    Move::new(col, row, to_col, to_row)
+                };
+
+                if takes && target_piece.is_none() && piece_type != PieceType::Pawn {
+                    return Err("Invalid capture move".to_string());
+                    // otherwise we validate en passant in validate_move
+                } else if !takes && target_piece.is_some() {
+                    return Err("Invalid non-capture move".to_string());
+                }
+
+                if self.validate_move(&mv).is_err() {
+                    continue;
+                }
+
+                if takes && target_piece.is_none() && piece_type == PieceType::Pawn {
+                    if self.board.is_en_passant_move(&mv).is_none() {
+                        continue;
+                    }
+                }
+
+                if result_mv != None {
+                    return Err(String::from("Ambiguous move"));
+                }
+                result_mv = Some(mv);
+            }
+        }
+
+        match result_mv {
+            Some(mv) => Ok(mv),
+            None => Err("No valid move found".to_string()),
+        }
     }
 
     pub fn get_moves_from(&self, col: i8, row: i8) -> &[Move] {
         let mut from = 0;
-        while from < self.possible_moves.len() && (self.possible_moves[from].from_col < col || self.possible_moves[from].from_row < row) {
+        while from < self.possible_moves.len()
+            && (self.possible_moves[from].from_col < col
+                || self.possible_moves[from].from_row < row)
+        {
             from += 1;
         }
         let mut to = from;
-        while to < self.possible_moves.len() && self.possible_moves[to].from_col == col && self.possible_moves[to].from_row == row {
+        while to < self.possible_moves.len()
+            && self.possible_moves[to].from_col == col
+            && self.possible_moves[to].from_row == row
+        {
             to += 1;
         }
         &self.possible_moves[from..to]
@@ -176,29 +332,38 @@ impl Game {
     pub fn get_moves_from_pos(&self, pos: Pos) -> &[Move] {
         self.get_moves_from(pos.col(), pos.row())
     }
-    
-    /// Collects possible moves and checks for check, checkmate, stalemate 
+
+    /// Collects possible moves and checks for check, checkmate, stalemate
     fn collect_game_state(&mut self) {
         self.is_check = self.board.is_check(self.turn);
 
         self.collect_possible_moves();
         if self.possible_moves.is_empty() {
             if self.is_check {
-                self.result = Some(GameResult {winner: Some(self.turn.opposite())})
+                self.result = Some(GameResult {
+                    winner: Some(self.turn.opposite()),
+                })
             } else {
-                self.result = Some(GameResult {winner: None})
+                self.result = Some(GameResult { winner: None })
             }
         }
     }
 
     /// Returns true if it is a promotion
-    fn validate_pawn_move(
-        &self,
-        mv: &Move,
-        color: PieceColor,
-    ) -> Result<bool, &'static str> {
+    fn validate_pawn_move(&self, mv: &Move, color: PieceColor) -> Result<bool, &'static str> {
         // if it's a move, not a capture
         if mv.is_pawn_move(color) {
+            let target_sq = self.board.at(mv.to_col, mv.to_row);
+            if target_sq.is_occupied() {
+                return Err("Pawn move blocked by another piece");
+            }
+            if mv.from_row.abs_diff(mv.to_row) == 2 {
+                let row = if color == White { mv.from_row + 1 } else { mv.from_row - 1};
+                let between_sq = self.board.at(mv.from_col, row);
+                if between_sq.is_occupied() {
+                    return Err("Pawn move blocked by another piece");
+                }
+            }
             if mv.to_row == 7 || mv.to_row == 0 {
                 Ok(true)
             } else {
@@ -302,7 +467,7 @@ impl GameHistory {
             moves: Vec::new(),
         }
     }
-    
+
     pub fn with_moves(moves: Vec<Move>) -> GameHistory {
         GameHistory {
             initial_state: None,

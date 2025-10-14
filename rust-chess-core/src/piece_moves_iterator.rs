@@ -102,11 +102,11 @@ impl<'a> PieceMovesIter<'a> {
                 self.set_next_phase();
                 continue;
             }
+            self.phase += 1;
             let is_promotion = pos.row() == 0 || pos.row() == 7;
             return if is_promotion {
                 Some(Move::with_promotion_from_pos(&self.from, &pos, PieceType::Queen))
             } else {
-                self.phase += 1;
                 self.move_to(&pos)
             }
         }
@@ -226,8 +226,9 @@ impl<'a> PieceMovesIter<'a> {
             if target.is_empty() {
                 return self.move_to(&self.current);
             } else if target.is_occupied_by_color(self.piece_color.opposite()) {
+                let current = &self.current.clone();
                 self.set_next_phase();
-                return self.move_to(&self.current);
+                return self.move_to(current);
             } else {
                 self.set_next_phase();
                 return None;

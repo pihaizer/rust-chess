@@ -1,5 +1,4 @@
 use rust_chess_core::game::Game;
-use rust_chess_core::r#move::Move;
 use std::io;
 use std::io::Write;
 
@@ -20,11 +19,18 @@ fn main() {
         }
         
         let command = input.trim();
-        let mv = Move::from_long_notation(command);
+        let mv = game.parse_short_notation(command);
+        let Ok(mv) = mv else {
+            println!("Error: {}", mv.err().unwrap());
+            continue
+        };
+        
         let move_result = game.make_move(&mv);
         if move_result.is_err() {
             println!("Error: {}", move_result.err().unwrap());
+            continue
         }
+        
         if let Some(game_result) = game.result() {
             println!("Game over!");
             if let Some(winner_color) = game_result.winner {
